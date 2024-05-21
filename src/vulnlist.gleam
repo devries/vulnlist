@@ -1,6 +1,8 @@
 import birl
 import birl/duration
 import gleam/dynamic
+import gleam/erlang
+import gleam/erlang/atom
 import gleam/hackney
 import gleam/http/request
 import gleam/int
@@ -11,6 +13,12 @@ import gleam/result
 import gleam/string
 
 pub fn main() {
+  // This is so that gleescript starts all the application dependencies
+  // of this program
+  let _ =
+    erlang.ensure_all_started(application: atom.create_from_string("vulnlist"))
+
+  // This is the actual program
   use json_data <- result.try(get_vulnerabilities())
   use vulnlist <- result.try({
     vulnlist_from_json(json_data)
