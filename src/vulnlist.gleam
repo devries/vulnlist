@@ -1,3 +1,4 @@
+import argv
 import birl
 import birl/duration
 import gleam/dynamic
@@ -9,6 +10,7 @@ import gleam/int
 import gleam/io
 import gleam/json
 import gleam/list
+import gleam/order
 import gleam/result
 import gleam/string
 
@@ -19,13 +21,36 @@ pub fn main() {
     erlang.ensure_all_started(application: atom.create_from_string("vulnlist"))
 
   // This is the actual program
+  let args = argv.load()
+
+  use _ <- result.try({
+    case args.arguments {
+      [] -> Ok(Nil)
+      ["all"] -> Ok(Nil)
+      _ -> {
+        io.println("Usage: <command> [all]")
+        Error(Nil)
+      }
+    }
+  })
+
   use json_data <- result.try(get_vulnerabilities())
   use vulnlist <- result.try({
     vulnlist_from_json(json_data)
     |> report_error("unable to parse data")
     |> result.nil_error
   })
+
   vulnlist.vulnerabilities
+  |> list.filter(fn(a: Vuln) {
+    let limit = birl.add(birl.now(), duration.hours(-1))
+    case args.arguments, birl.compare(a.due, limit) {
+      ["all"], _ -> True
+      _, order.Lt -> False
+      _, order.Eq -> True
+      _, order.Gt -> True
+    }
+  })
   |> list.sort(fn(a: Vuln, b: Vuln) { birl.compare(a.due, b.due) })
   |> list.index_map(fn(vl, idx) {
     int.to_string(idx + 1)
