@@ -3,54 +3,51 @@ import birl/duration
 import gleam/dynamic
 import gleam/erlang
 import gleam/erlang/atom
-import gleam/hackney
+import gleam/fetch
 import gleam/http/request
 import gleam/int
 import gleam/io
+import gleam/javascript/promise
 import gleam/json
 import gleam/list
 import gleam/result
 import gleam/string
 
 pub fn main() {
-  // This is so that gleescript starts all the application dependencies
-  // of this program
-  let _ =
-    erlang.ensure_all_started(application: atom.create_from_string("vulnlist"))
-
   // This is the actual program
-  use json_data <- result.try(get_vulnerabilities())
-  use vulnlist <- result.try({
-    vulnlist_from_json(json_data)
-    |> report_error("unable to parse data")
-    |> result.nil_error
+  use json_data <- promise.try_await(get_vulnerabilities())
+  promise.resolve({
+    use vulnlist <- result.try({
+      vulnlist_from_json(json_data)
+      |> report_error("unable to parse data")
+      |> result.nil_error
+    })
+    vulnlist.vulnerabilities
+    |> list.sort(fn(a: Vuln, b: Vuln) { birl.compare(a.due, b.due) })
+    |> list.index_map(fn(vl, idx) {
+      int.to_string(idx + 1)
+      <> ". "
+      <> vl.vendor_project
+      <> " - "
+      <> vl.product
+      <> " - "
+      <> vl.vulnerability_name
+      <> " - "
+      <> vl.cve_id
+      <> "\n\tAdded: "
+      <> time_to_date(vl.date_added)
+      <> "\n\tDeadline: "
+      <> deadline(vl.due)
+      <> " ("
+      <> time_to_date(vl.due)
+      <> ")\n\tACTION: "
+      <> vl.action
+      <> "\n"
+    })
+    |> string.join("\n")
+    |> io.println
+    Ok(Nil)
   })
-  vulnlist.vulnerabilities
-  |> list.sort(fn(a: Vuln, b: Vuln) { birl.compare(a.due, b.due) })
-  |> list.index_map(fn(vl, idx) {
-    int.to_string(idx + 1)
-    <> ". "
-    <> vl.vendor_project
-    <> " - "
-    <> vl.product
-    <> " - "
-    <> vl.vulnerability_name
-    <> " - "
-    <> vl.cve_id
-    <> "\n\tAdded: "
-    <> time_to_date(vl.date_added)
-    <> "\n\tDeadline: "
-    <> deadline(vl.due)
-    <> " ("
-    <> time_to_date(vl.due)
-    <> ")\n\tACTION: "
-    <> vl.action
-    <> "\n"
-  })
-  |> string.join("\n")
-  |> io.println
-
-  Ok(Nil)
 }
 
 pub type Vuln {
@@ -108,19 +105,19 @@ pub fn vulnlist_from_json(
   json.decode(from: json_string, using: decoder)
 }
 
-fn get_vulnerabilities() -> Result(String, Nil) {
+fn get_vulnerabilities() -> promise.Promise(Result(String, Nil)) {
   let assert Ok(req) =
     request.to(
       "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
     )
-
-  use response <- result.try(
-    req
-    |> hackney.send
-    |> report_error("unable to send query")
-    |> result.nil_error,
+  promise.await(
+    {
+      use response <- promise.try_await(fetch.send(req))
+      use response <- promise.try_await(fetch.read_text_body(response))
+      promise.resolve(Ok(response.body))
+    },
+    fn(a) { promise.resolve(result.nil_error(a)) },
   )
-  Ok(response.body)
 }
 
 fn report_error(r: Result(a, b), message: String) -> Result(a, b) {
