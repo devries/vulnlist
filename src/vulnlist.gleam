@@ -125,7 +125,7 @@ fn get_vulnerabilities() -> Result(String, Nil) {
 
 fn report_error(r: Result(a, b), message: String) -> Result(a, b) {
   use ev <- result.try_recover(r)
-  io.println(message)
+  io.println(message <> ": " <> string.inspect(ev))
   Error(ev)
 }
 
