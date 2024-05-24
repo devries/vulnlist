@@ -23,16 +23,7 @@ pub fn main() {
   // This is the actual program
   let args = argv.load()
 
-  use _ <- result.try({
-    case args.arguments {
-      [] -> Ok(Nil)
-      ["all"] -> Ok(Nil)
-      _ -> {
-        io.println("Usage: <command> [all]")
-        Error(Nil)
-      }
-    }
-  })
+  use vuln_filters <- result.try(create_filter(args.arguments))
 
   use json_data <- result.try(get_vulnerabilities())
   use vulnlist <- result.try({
@@ -42,15 +33,7 @@ pub fn main() {
   })
 
   vulnlist.vulnerabilities
-  |> list.filter(fn(a: Vuln) {
-    let limit = birl.add(birl.now(), duration.hours(-1))
-    case args.arguments, birl.compare(a.due, limit) {
-      ["all"], _ -> True
-      _, order.Lt -> False
-      _, order.Eq -> True
-      _, order.Gt -> True
-    }
-  })
+  |> list.filter(vuln_filters)
   |> list.sort(fn(a: Vuln, b: Vuln) { birl.compare(a.due, b.due) })
   |> list.index_map(fn(vl, idx) {
     int.to_string(idx + 1)
@@ -218,4 +201,78 @@ fn deadline(t: birl.Time) -> String {
     0 -> "TODAY"
     _ -> "OVERDUE"
   }
+}
+
+fn create_filter(args: List(String)) -> Result(fn(Vuln) -> Bool, Nil) {
+  create_filter_acc(args, fn(_) { True })
+}
+
+fn create_filter_acc(
+  args: List(String),
+  acc: fn(Vuln) -> Bool,
+) -> Result(fn(Vuln) -> Bool, Nil) {
+  case args {
+    [] -> Ok(acc)
+    ["-n", ..rest] | ["--new", ..rest] -> {
+      create_filter_acc(rest, fn(v: Vuln) { acc(v) && filter_out_overdue(v) })
+    }
+    ["-c", search_term, ..rest] | ["--cve", search_term, ..rest] -> {
+      create_filter_acc(rest, fn(v: Vuln) {
+        acc(v) && filter_cve(v, search_term)
+      })
+    }
+    ["-a", search_term, ..rest] | ["--any", search_term, ..rest] -> {
+      create_filter_acc(rest, fn(v: Vuln) {
+        acc(v) && filter_any(v, search_term)
+      })
+    }
+    ["-v", search_term, ..rest] | ["--vendor", search_term, ..rest] -> {
+      create_filter_acc(rest, fn(v: Vuln) {
+        acc(v) && filter_vendor(v, search_term)
+      })
+    }
+    ["-h", ..] | ["--help", ..] -> {
+      usage()
+      Error(Nil)
+    }
+    [_, ..] -> {
+      usage()
+      Error(Nil)
+    }
+  }
+}
+
+fn filter_out_overdue(a: Vuln) -> Bool {
+  let limit = birl.add(birl.now(), duration.hours(-1))
+  case birl.compare(a.due, limit) {
+    order.Lt -> False
+    order.Eq -> True
+    order.Gt -> True
+  }
+}
+
+fn filter_cve(a: Vuln, cve: String) -> Bool {
+  string.lowercase(a.cve_id)
+  |> string.contains(string.lowercase(cve))
+}
+
+fn filter_any(a: Vuln, s: String) -> Bool {
+  let v =
+    string.lowercase(a.vendor_project)
+    <> ":"
+    <> string.lowercase(a.product)
+    <> ":"
+    <> string.lowercase(a.description)
+  string.contains(v, string.lowercase(s))
+}
+
+fn filter_vendor(a: Vuln, s: String) -> Bool {
+  string.lowercase(a.vendor_project)
+  |> string.contains(string.lowercase(s))
+}
+
+fn usage() -> Nil {
+  io.println("Usage: <cmd> [-n | --new]")
+  io.println("       -n | --new - Only show not overdue")
+  Nil
 }
