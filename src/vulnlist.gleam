@@ -272,7 +272,19 @@ fn filter_vendor(a: Vuln, s: String) -> Bool {
 }
 
 fn usage() -> Nil {
-  io.println("Usage: <cmd> [-n | --new]")
-  io.println("       -n | --new - Only show not overdue")
+  io.println(
+    "Usage: <cmd> [-n | --new] [ -a | --any <search_term>] [ -c | --cve <search_term>] [ -v || --vendor <search_term>]",
+  )
+  io.println("       -n | --new                  - Only show not overdue")
+  io.println(
+    "       -a | --any <search_term>    - Case insensitive search for search term in vendor, product, or description",
+  )
+  io.println(
+    "       -c | --cve <search_term>    - Case insensitive search for search term in CVE ID",
+  )
+  io.println(
+    "       -v | --vendor <search_term> - Case insensitive search for search term in CVE ID",
+  )
+  io.println("       -h | --help                 - Show this help")
   Nil
 }
