@@ -2,8 +2,6 @@ import argv
 import birl
 import birl/duration
 import gleam/dynamic
-import gleam/erlang
-import gleam/erlang/atom
 import gleam/hackney
 import gleam/http/request
 import gleam/int
@@ -15,12 +13,6 @@ import gleam/result
 import gleam/string
 
 pub fn main() {
-  // This is so that gleescript starts all the application dependencies
-  // of this program
-  let _ =
-    erlang.ensure_all_started(application: atom.create_from_string("vulnlist"))
-
-  // This is the actual program
   let args = argv.load()
 
   use vuln_filters <- result.try(create_filter(args.arguments))
@@ -190,16 +182,35 @@ fn digitstring(v: Int, digits: Int) -> String {
 }
 
 fn days_until(t: birl.Time) -> Int {
-  birl.difference(t, birl.now())
+  difference_seconds(t, birl.now())
   |> duration.blur_to(duration.Day)
 }
 
+// birl is having issues
+fn difference_seconds(a: birl.Time, b: birl.Time) -> duration.Duration {
+  let au = birl.to_unix(a)
+  let bu = birl.to_unix(b)
+
+  duration.seconds(au - bu)
+}
+
 fn deadline(t: birl.Time) -> String {
-  case days_until(t) {
+  let du = days_until(t)
+  case du {
     n if n > 1 -> int.to_string(n) <> " days"
     1 -> "1 day"
     0 -> "TODAY"
     _ -> "OVERDUE"
+  }
+}
+
+// birl is having issues
+fn compare_seconds(a: birl.Time, b: birl.Time) -> order.Order {
+  let diff = birl.to_unix(a) - birl.to_unix(b)
+  case diff {
+    s if s < 0 -> order.Lt
+    s if s > 0 -> order.Gt
+    _ -> order.Eq
   }
 }
 
@@ -244,7 +255,7 @@ fn create_filter_acc(
 
 fn filter_out_overdue(a: Vuln) -> Bool {
   let limit = birl.add(birl.now(), duration.hours(-1))
-  case birl.compare(a.due, limit) {
+  case compare_seconds(a.due, limit) {
     order.Lt -> False
     order.Eq -> True
     order.Gt -> True
