@@ -215,32 +215,29 @@ fn compare_seconds(a: birl.Time, b: birl.Time) -> order.Order {
 }
 
 fn create_filter(args: List(String)) -> Result(fn(Vuln) -> Bool, Nil) {
-  create_filter_acc(args, fn(_) { True })
+  use subfilters <- result.try(create_filter_acc(args, []))
+  let res = fn(v: Vuln) -> Bool { list.all(subfilters, fn(f) { f(v) }) }
+
+  Ok(res)
 }
 
 fn create_filter_acc(
   args: List(String),
-  acc: fn(Vuln) -> Bool,
-) -> Result(fn(Vuln) -> Bool, Nil) {
+  acc: List(fn(Vuln) -> Bool),
+) -> Result(List(fn(Vuln) -> Bool), Nil) {
   case args {
     [] -> Ok(acc)
     ["-n", ..rest] | ["--new", ..rest] -> {
-      create_filter_acc(rest, fn(v: Vuln) { acc(v) && filter_out_overdue(v) })
+      create_filter_acc(rest, [filter_out_overdue, ..acc])
     }
     ["-c", search_term, ..rest] | ["--cve", search_term, ..rest] -> {
-      create_filter_acc(rest, fn(v: Vuln) {
-        acc(v) && filter_cve(v, search_term)
-      })
+      create_filter_acc(rest, [filter_cve(_, search_term), ..acc])
     }
     ["-a", search_term, ..rest] | ["--any", search_term, ..rest] -> {
-      create_filter_acc(rest, fn(v: Vuln) {
-        acc(v) && filter_any(v, search_term)
-      })
+      create_filter_acc(rest, [filter_any(_, search_term), ..acc])
     }
     ["-v", search_term, ..rest] | ["--vendor", search_term, ..rest] -> {
-      create_filter_acc(rest, fn(v: Vuln) {
-        acc(v) && filter_vendor(v, search_term)
-      })
+      create_filter_acc(rest, [filter_vendor(_, search_term), ..acc])
     }
     ["-h", ..] | ["--help", ..] -> {
       usage()
