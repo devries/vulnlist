@@ -15,7 +15,7 @@ import gleam/string
 pub fn main() {
   let args = argv.load()
 
-  use vuln_filters <- result.try(create_filter(args.arguments))
+  use vuln_filters <- result.try(create_filter(args))
 
   use json_data <- result.try(get_vulnerabilities())
   use vulnlist <- result.try({
@@ -214,8 +214,10 @@ fn compare_seconds(a: birl.Time, b: birl.Time) -> order.Order {
   }
 }
 
-fn create_filter(args: List(String)) -> Result(fn(Vuln) -> Bool, Nil) {
-  use subfilters <- result.try(create_filter_acc(args, []))
+fn create_filter(args: argv.Argv) -> Result(fn(Vuln) -> Bool, Nil) {
+  use subfilters <- result.try(
+    create_filter_acc(args.arguments, args.program, []),
+  )
   let res = fn(v: Vuln) -> Bool { list.all(subfilters, fn(f) { f(v) }) }
 
   Ok(res)
@@ -223,28 +225,29 @@ fn create_filter(args: List(String)) -> Result(fn(Vuln) -> Bool, Nil) {
 
 fn create_filter_acc(
   args: List(String),
+  cmd: String,
   acc: List(fn(Vuln) -> Bool),
 ) -> Result(List(fn(Vuln) -> Bool), Nil) {
   case args {
     [] -> Ok(acc)
     ["-n", ..rest] | ["--new", ..rest] -> {
-      create_filter_acc(rest, [filter_out_overdue, ..acc])
+      create_filter_acc(rest, cmd, [filter_out_overdue, ..acc])
     }
     ["-c", search_term, ..rest] | ["--cve", search_term, ..rest] -> {
-      create_filter_acc(rest, [filter_cve(_, search_term), ..acc])
+      create_filter_acc(rest, cmd, [filter_cve(_, search_term), ..acc])
     }
     ["-a", search_term, ..rest] | ["--any", search_term, ..rest] -> {
-      create_filter_acc(rest, [filter_any(_, search_term), ..acc])
+      create_filter_acc(rest, cmd, [filter_any(_, search_term), ..acc])
     }
     ["-v", search_term, ..rest] | ["--vendor", search_term, ..rest] -> {
-      create_filter_acc(rest, [filter_vendor(_, search_term), ..acc])
+      create_filter_acc(rest, cmd, [filter_vendor(_, search_term), ..acc])
     }
     ["-h", ..] | ["--help", ..] -> {
-      usage()
+      usage(cmd)
       Error(Nil)
     }
     [_, ..] -> {
-      usage()
+      usage(cmd)
       Error(Nil)
     }
   }
@@ -279,9 +282,11 @@ fn filter_vendor(a: Vuln, s: String) -> Bool {
   |> string.contains(string.lowercase(s))
 }
 
-fn usage() -> Nil {
+fn usage(command: String) -> Nil {
   io.println(
-    "Usage: <cmd> [-n | --new] [ -a | --any <search_term>] [ -c | --cve <search_term>] [ -v || --vendor <search_term>]",
+    "Usage: "
+    <> command
+    <> " [-n | --new] [ -a | --any <search_term>] [ -c | --cve <search_term>] [ -v || --vendor <search_term>]",
   )
   io.println("       -n | --new                  - Only show not overdue")
   io.println(
