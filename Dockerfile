@@ -1,4 +1,4 @@
-FROM ghcr.io/gleam-lang/gleam:v1.3.1-erlang-alpine AS build
+FROM ghcr.io/gleam-lang/gleam:v1.4.0-erlang-alpine AS build
 WORKDIR /src
 COPY . .
 RUN gleam export erlang-shipment
