@@ -132,8 +132,8 @@ fn report_error(r: Result(a, b), message: String) -> Result(a, b) {
 fn trimmed_string(
   from data: dynamic.Dynamic,
 ) -> Result(String, List(dynamic.DecodeError)) {
-  use untrimmed <- result.try(dynamic.string(from: data))
-  Ok(string.trim(untrimmed))
+  use untrimmed <- result.map(dynamic.string(from: data))
+  string.trim(untrimmed)
 }
 
 fn decode_date(
