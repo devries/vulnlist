@@ -6,7 +6,7 @@ SOURCE := src/vulnlist.gleam
 build: $(BINARY)
 	
 $(BINARY): $(SOURCE) manifest.toml
-	gleam run -m gleescript
+	gleam export escript
 
 test:
 	gleam test
