@@ -1,9 +1,7 @@
 import argv
-import birl
-import birl/duration
-import gleam/dynamic
-import gleam/hackney
+import gleam/dynamic/decode
 import gleam/http/request
+import gleam/httpc
 import gleam/int
 import gleam/io
 import gleam/json
@@ -11,6 +9,9 @@ import gleam/list
 import gleam/order
 import gleam/result
 import gleam/string
+import gleam/time/calendar
+import gleam/time/duration
+import gleam/time/timestamp
 
 pub fn main() {
   let args = argv.load()
@@ -21,12 +22,12 @@ pub fn main() {
   use vulnlist <- result.try({
     vulnlist_from_json(json_data)
     |> report_error("unable to parse data")
-    |> result.nil_error
+    |> result.replace_error(Nil)
   })
 
   vulnlist.vulnerabilities
   |> list.filter(vuln_filters)
-  |> list.sort(fn(a: Vuln, b: Vuln) { birl.compare(a.due, b.due) })
+  |> list.sort(fn(a: Vuln, b: Vuln) { timestamp.compare(a.due, b.due) })
   |> list.index_map(fn(vl, idx) {
     int.to_string(idx + 1)
     <> ". "
@@ -59,10 +60,10 @@ pub type Vuln {
     vendor_project: String,
     product: String,
     vulnerability_name: String,
-    date_added: birl.Time,
+    date_added: timestamp.Timestamp,
     description: String,
     action: String,
-    due: birl.Time,
+    due: timestamp.Timestamp,
   )
 }
 
@@ -76,36 +77,52 @@ pub type VulnList {
   )
 }
 
-pub fn vuln_decoder(
-  v: dynamic.Dynamic,
-) -> Result(Vuln, List(dynamic.DecodeError)) {
-  dynamic.decode8(
-    Vuln,
-    dynamic.field("cveID", of: trimmed_string),
-    dynamic.field("vendorProject", of: trimmed_string),
-    dynamic.field("product", of: trimmed_string),
-    dynamic.field("vulnerabilityName", of: trimmed_string),
-    dynamic.field("dateAdded", of: decode_date),
-    dynamic.field("shortDescription", of: trimmed_string),
-    dynamic.field("requiredAction", of: trimmed_string),
-    dynamic.field("dueDate", of: decode_date),
-  )(v)
+pub fn vuln_decoder() -> decode.Decoder(Vuln) {
+  use cve_id <- decode.field("cveID", trimmed_string_decoder())
+  use vendor_project <- decode.field("vendorProject", trimmed_string_decoder())
+  use product <- decode.field("product", trimmed_string_decoder())
+  use vuln_name <- decode.field("vulnerabilityName", trimmed_string_decoder())
+  use date_added <- decode.field("dateAdded", date_decoder())
+  use description <- decode.field("shortDescription", trimmed_string_decoder())
+  use action <- decode.field("requiredAction", trimmed_string_decoder())
+  use due <- decode.field("dueDate", date_decoder())
+  decode.success(Vuln(
+    cve_id,
+    vendor_project,
+    product,
+    vuln_name,
+    date_added,
+    description,
+    action,
+    due,
+  ))
 }
 
 pub fn vulnlist_from_json(
   json_string: String,
 ) -> Result(VulnList, json.DecodeError) {
-  let decoder =
-    dynamic.decode5(
-      VulnList,
-      dynamic.field("title", of: trimmed_string),
-      dynamic.field("catalogVersion", of: trimmed_string),
-      dynamic.field("dateReleased", of: trimmed_string),
-      dynamic.field("count", of: dynamic.int),
-      dynamic.field("vulnerabilities", of: dynamic.list(vuln_decoder)),
+  let decoder = {
+    use title <- decode.field("title", trimmed_string_decoder())
+    use catalog_version <- decode.field(
+      "catalogVersion",
+      trimmed_string_decoder(),
     )
+    use date_released <- decode.field("dateReleased", trimmed_string_decoder())
+    use count <- decode.field("count", decode.int)
+    use vulnerabilities <- decode.field(
+      "vulnerabilities",
+      decode.list(vuln_decoder()),
+    )
+    decode.success(VulnList(
+      title,
+      catalog_version,
+      date_released,
+      count,
+      vulnerabilities,
+    ))
+  }
 
-  json.decode(from: json_string, using: decoder)
+  json.parse(from: json_string, using: decoder)
 }
 
 fn get_vulnerabilities() -> Result(String, Nil) {
@@ -116,9 +133,9 @@ fn get_vulnerabilities() -> Result(String, Nil) {
 
   use response <- result.try(
     req
-    |> hackney.send
+    |> httpc.send
     |> report_error("unable to send query")
-    |> result.nil_error,
+    |> result.replace_error(Nil),
   )
   Ok(response.body)
 }
@@ -129,88 +146,74 @@ fn report_error(r: Result(a, b), message: String) -> Result(a, b) {
   Error(ev)
 }
 
-fn trimmed_string(
-  from data: dynamic.Dynamic,
-) -> Result(String, List(dynamic.DecodeError)) {
-  use untrimmed <- result.map(dynamic.string(from: data))
-  string.trim(untrimmed)
+fn trimmed_string_decoder() {
+  decode.string
+  |> decode.map(string.trim)
 }
 
-fn decode_date(
-  from data: dynamic.Dynamic,
-) -> Result(birl.Time, List(dynamic.DecodeError)) {
-  use trimmed_string <- result.try(trimmed_string(from: data))
-
-  let err = [
-    dynamic.DecodeError(
-      "String of form YYYY-MM-DD",
-      found: trimmed_string,
-      path: [],
-    ),
-  ]
-
-  use values <- result.try(
+fn date_decoder() -> decode.Decoder(timestamp.Timestamp) {
+  use trimmed_string <- decode.then(trimmed_string_decoder())
+  let values =
     string.split(trimmed_string, "-")
     |> list.map(int.parse)
     |> result.all
-    |> result.replace_error(err),
-  )
-  case values {
-    [year, month, day] -> {
-      let t =
-        birl.now()
-        |> birl.set_day(birl.Day(year, month, day))
 
-      Ok(t)
+  case values {
+    Ok([year, month_int, day]) -> {
+      case calendar.month_from_int(month_int) {
+        Ok(month) -> {
+          let dt = calendar.Date(year, month, day)
+          // let #(_, tod) =
+          //   timestamp.system_time()
+          //   |> timestamp.to_calendar(calendar.local_offset())
+          let tod = calendar.TimeOfDay(0, 0, 0, 0)
+
+          decode.success(timestamp.from_calendar(
+            dt,
+            tod,
+            calendar.local_offset(),
+          ))
+        }
+
+        _ ->
+          decode.failure(
+            timestamp.from_unix_seconds(0),
+            "YYYY-MM-DD with MM between 01 and 12",
+          )
+      }
     }
-    _ -> Error(err)
+    _ -> decode.failure(timestamp.from_unix_seconds(0), "YYYY-MM-DD")
   }
 }
 
-fn time_to_date(t: birl.Time) -> String {
-  let day = birl.get_day(t)
+fn time_to_date(t: timestamp.Timestamp) -> String {
+  let #(day, _) = timestamp.to_calendar(t, calendar.local_offset())
   digitstring(day.year, 4)
   <> "-"
-  <> digitstring(day.month, 2)
+  <> digitstring(calendar.month_to_int(day.month), 2)
   <> "-"
-  <> digitstring(day.date, 2)
+  <> digitstring(day.day, 2)
 }
 
 fn digitstring(v: Int, digits: Int) -> String {
   int.to_string(v)
-  |> string.pad_left(to: digits, with: "0")
+  |> string.pad_start(to: digits, with: "0")
 }
 
-fn days_until(t: birl.Time) -> Int {
-  difference_seconds(t, birl.now())
-  |> duration.blur_to(duration.Day)
+fn days_until(t: timestamp.Timestamp) -> Int {
+  let diff =
+    duration.to_milliseconds(timestamp.difference(timestamp.system_time(), t))
+
+  { diff + 86_400_000 } / 86_400_000
 }
 
-// birl is having issues
-fn difference_seconds(a: birl.Time, b: birl.Time) -> duration.Duration {
-  let au = birl.to_unix(a)
-  let bu = birl.to_unix(b)
-
-  duration.seconds(au - bu)
-}
-
-fn deadline(t: birl.Time) -> String {
+fn deadline(t: timestamp.Timestamp) -> String {
   let du = days_until(t)
   case du {
     n if n > 1 -> int.to_string(n) <> " days"
     1 -> "1 day"
     0 -> "TODAY"
     _ -> "OVERDUE"
-  }
-}
-
-// birl is having issues
-fn compare_seconds(a: birl.Time, b: birl.Time) -> order.Order {
-  let diff = birl.to_unix(a) - birl.to_unix(b)
-  case diff {
-    s if s < 0 -> order.Lt
-    s if s > 0 -> order.Gt
-    _ -> order.Eq
   }
 }
 
@@ -254,8 +257,8 @@ fn create_filter_acc(
 }
 
 fn filter_out_overdue(a: Vuln) -> Bool {
-  let limit = birl.add(birl.now(), duration.hours(-1))
-  case compare_seconds(a.due, limit) {
+  let limit = timestamp.add(timestamp.system_time(), duration.hours(-24))
+  case timestamp.compare(a.due, limit) {
     order.Lt -> False
     order.Eq -> True
     order.Gt -> True
