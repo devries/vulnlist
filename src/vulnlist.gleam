@@ -204,7 +204,10 @@ fn days_until(t: timestamp.Timestamp) -> Int {
   let diff =
     duration.to_milliseconds(timestamp.difference(timestamp.system_time(), t))
 
-  { diff + 86_400_000 } / 86_400_000
+  case diff > 0 {
+    True -> { diff + 86_400_000 } / 86_400_000
+    False -> diff / 86_400_000
+  }
 }
 
 fn deadline(t: timestamp.Timestamp) -> String {
