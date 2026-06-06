@@ -16,7 +16,11 @@ import gleam/time/timestamp
 pub fn main() {
   let args = argv.load()
 
-  use vuln_filters <- result.try(create_filter(args))
+  use config <- result.try(parse_args(
+    args.arguments,
+    args.program,
+    Config(filters: [], order: Deadline),
+  ))
 
   use json_data <- result.try(get_vulnerabilities())
   use vulnlist <- result.try({
@@ -26,8 +30,13 @@ pub fn main() {
   })
 
   vulnlist.vulnerabilities
-  |> list.filter(vuln_filters)
-  |> list.sort(fn(a: Vuln, b: Vuln) { timestamp.compare(a.due, b.due) })
+  |> list.filter(fn(vuln) { list.all(config.filters, matches_filter(_, vuln)) })
+  |> list.sort(fn(a: Vuln, b: Vuln) {
+    case config.order {
+      Deadline -> timestamp.compare(a.due, b.due)
+      Creation -> timestamp.compare(a.date_added, b.date_added)
+    }
+  })
   |> list.index_map(fn(vl, idx) {
     int.to_string(idx + 1)
     <> ". "
@@ -220,33 +229,55 @@ fn deadline(t: timestamp.Timestamp) -> String {
   }
 }
 
-fn create_filter(args: argv.Argv) -> Result(fn(Vuln) -> Bool, Nil) {
-  use subfilters <- result.try(
-    create_filter_acc(args.arguments, args.program, []),
-  )
-  let res = fn(v: Vuln) -> Bool { list.all(subfilters, fn(f) { f(v) }) }
-
-  Ok(res)
+pub type Filter {
+  New
+  Cve(search_term: String)
+  Any(search_term: String)
+  Vendor(search_term: String)
 }
 
-fn create_filter_acc(
+pub type SortOrder {
+  Deadline
+  Creation
+}
+
+pub type Config {
+  Config(filters: List(Filter), order: SortOrder)
+}
+
+fn parse_args(
   args: List(String),
   cmd: String,
-  acc: List(fn(Vuln) -> Bool),
-) -> Result(List(fn(Vuln) -> Bool), Nil) {
+  config: Config,
+) -> Result(Config, Nil) {
   case args {
-    [] -> Ok(acc)
+    [] -> Ok(config)
     ["-n", ..rest] | ["--new", ..rest] -> {
-      create_filter_acc(rest, cmd, [filter_out_overdue, ..acc])
+      parse_args(rest, cmd, Config(..config, filters: [New, ..config.filters]))
     }
     ["-c", search_term, ..rest] | ["--cve", search_term, ..rest] -> {
-      create_filter_acc(rest, cmd, [filter_cve(_, search_term), ..acc])
+      parse_args(
+        rest,
+        cmd,
+        Config(..config, filters: [Cve(search_term), ..config.filters]),
+      )
     }
     ["-a", search_term, ..rest] | ["--any", search_term, ..rest] -> {
-      create_filter_acc(rest, cmd, [filter_any(_, search_term), ..acc])
+      parse_args(
+        rest,
+        cmd,
+        Config(..config, filters: [Any(search_term), ..config.filters]),
+      )
     }
     ["-v", search_term, ..rest] | ["--vendor", search_term, ..rest] -> {
-      create_filter_acc(rest, cmd, [filter_vendor(_, search_term), ..acc])
+      parse_args(
+        rest,
+        cmd,
+        Config(..config, filters: [Vendor(search_term), ..config.filters]),
+      )
+    }
+    ["-d", ..rest] | ["--added", ..rest] -> {
+      parse_args(rest, cmd, Config(..config, order: Creation))
     }
     ["-h", ..] | ["--help", ..] -> {
       usage(cmd)
@@ -259,40 +290,41 @@ fn create_filter_acc(
   }
 }
 
-fn filter_out_overdue(a: Vuln) -> Bool {
-  let limit = timestamp.add(timestamp.system_time(), duration.hours(-24))
-  case timestamp.compare(a.due, limit) {
-    order.Lt -> False
-    order.Eq -> True
-    order.Gt -> True
+fn matches_filter(filter: Filter, vulnerability: Vuln) -> Bool {
+  case filter {
+    New -> {
+      let limit = timestamp.add(timestamp.system_time(), duration.hours(-24))
+      case timestamp.compare(vulnerability.due, limit) {
+        order.Lt -> False
+        _ -> True
+      }
+    }
+    Cve(term) -> {
+      string.lowercase(vulnerability.cve_id)
+      |> string.contains(string.lowercase(term))
+    }
+    Any(term) -> {
+      let combined =
+        string.lowercase(vulnerability.vendor_project)
+        <> ":"
+        <> string.lowercase(vulnerability.product)
+        <> ":"
+        <> string.lowercase(vulnerability.description)
+      string.contains(combined, string.lowercase(term))
+    }
+    Vendor(term) -> {
+      string.lowercase(vulnerability.vendor_project)
+      |> string.contains(string.lowercase(term))
+    }
   }
-}
-
-fn filter_cve(a: Vuln, cve: String) -> Bool {
-  string.lowercase(a.cve_id)
-  |> string.contains(string.lowercase(cve))
-}
-
-fn filter_any(a: Vuln, s: String) -> Bool {
-  let v =
-    string.lowercase(a.vendor_project)
-    <> ":"
-    <> string.lowercase(a.product)
-    <> ":"
-    <> string.lowercase(a.description)
-  string.contains(v, string.lowercase(s))
-}
-
-fn filter_vendor(a: Vuln, s: String) -> Bool {
-  string.lowercase(a.vendor_project)
-  |> string.contains(string.lowercase(s))
 }
 
 fn usage(command: String) -> Nil {
   io.println(
     "Usage: "
     <> command
-    <> " [-n | --new] [ -a | --any <search_term>] [ -c | --cve <search_term>] [ -v || --vendor <search_term>]",
+    <> " [-n | --new] [ -a | --any <search_term>] [ -c | --cve <search_term>] [ -v || --vendor <search_term>]"
+    <> "\n                  [-d | --added]",
   )
   io.println("       -n | --new                  - Only show not overdue")
   io.println(
@@ -304,6 +336,7 @@ fn usage(command: String) -> Nil {
   io.println(
     "       -v | --vendor <search_term> - Case insensitive search for search term in CVE ID",
   )
+  io.println("       -d | --added                - Sort by date added")
   io.println("       -h | --help                 - Show this help")
   Nil
 }
