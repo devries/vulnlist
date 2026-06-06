@@ -1,4 +1,7 @@
 import argv
+import directories
+import filepath
+import gleam/bool
 import gleam/dynamic/decode
 import gleam/http/request
 import gleam/httpc
@@ -12,6 +15,7 @@ import gleam/string
 import gleam/time/calendar
 import gleam/time/duration
 import gleam/time/timestamp
+import simplifile
 
 pub fn main() {
   let args = argv.load()
@@ -19,10 +23,10 @@ pub fn main() {
   use config <- result.try(parse_args(
     args.arguments,
     args.program,
-    Config(filters: [], order: Deadline),
+    Config(filters: [], order: Deadline, force_fetch: False),
   ))
 
-  use json_data <- result.try(get_vulnerabilities())
+  use json_data <- result.try(get_vulnerabilities(config.force_fetch))
   use vulnlist <- result.try({
     vulnlist_from_json(json_data)
     |> report_error("unable to parse data")
@@ -134,7 +138,30 @@ pub fn vulnlist_from_json(
   json.parse(from: json_string, using: decoder)
 }
 
-fn get_vulnerabilities() -> Result(String, Nil) {
+fn get_vulnerabilities(force_fetch: Bool) -> Result(String, Nil) {
+  case get_cache_file_path("kev.json") {
+    Error(Nil) -> pull_vulnerabilities()
+    Ok(filepath) ->
+      case bool.or(force_fetch, need_vuln_refresh(filepath)) {
+        False -> {
+          io.println("Note: using cached data")
+          simplifile.read(filepath)
+          |> report_error("error accessing cache " <> filepath)
+          |> result.replace_error(Nil)
+        }
+        True ->
+          case pull_vulnerabilities() {
+            Error(Nil) -> Error(Nil)
+            Ok(body) -> {
+              let _ = simplifile.write(filepath, body)
+              Ok(body)
+            }
+          }
+      }
+  }
+}
+
+fn pull_vulnerabilities() -> Result(String, Nil) {
   let assert Ok(req) =
     request.to(
       "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
@@ -147,6 +174,27 @@ fn get_vulnerabilities() -> Result(String, Nil) {
     |> result.replace_error(Nil),
   )
   Ok(response.body)
+}
+
+fn get_cache_file_path(filename: String) -> Result(String, Nil) {
+  use base_dir <- result.try(directories.cache_dir())
+
+  let app_dir = filepath.join(base_dir, "vulnlist")
+
+  case simplifile.create_directory_all(app_dir) {
+    Ok(_) -> Ok(filepath.join(app_dir, filename))
+    Error(_) -> Error(Nil)
+  }
+}
+
+fn need_vuln_refresh(filepath: String) -> Bool {
+  let #(current, _) =
+    timestamp.to_unix_seconds_and_nanoseconds(timestamp.system_time())
+
+  case simplifile.file_info(filepath) {
+    Error(_) -> True
+    Ok(info) -> info.mtime_seconds < { current - 3600 }
+  }
 }
 
 fn report_error(r: Result(a, b), message: String) -> Result(a, b) {
@@ -242,7 +290,7 @@ pub type SortOrder {
 }
 
 pub type Config {
-  Config(filters: List(Filter), order: SortOrder)
+  Config(filters: List(Filter), order: SortOrder, force_fetch: Bool)
 }
 
 fn parse_args(
@@ -278,6 +326,9 @@ fn parse_args(
     }
     ["-d", ..rest] | ["--added", ..rest] -> {
       parse_args(rest, cmd, Config(..config, order: Creation))
+    }
+    ["-f", ..rest] | ["--fetch", ..rest] -> {
+      parse_args(rest, cmd, Config(..config, force_fetch: True))
     }
     ["-h", ..] | ["--help", ..] -> {
       usage(cmd)
@@ -324,7 +375,7 @@ fn usage(command: String) -> Nil {
     "Usage: "
     <> command
     <> " [-n | --new] [ -a | --any <search_term>] [ -c | --cve <search_term>] [ -v || --vendor <search_term>]"
-    <> "\n                  [-d | --added]",
+    <> "\n                  [-d | --added] [-f | --fetch]",
   )
   io.println("       -n | --new                  - Only show not overdue")
   io.println(
@@ -337,6 +388,7 @@ fn usage(command: String) -> Nil {
     "       -v | --vendor <search_term> - Case insensitive search for search term in CVE ID",
   )
   io.println("       -d | --added                - Sort by date added")
+  io.println("       -f | --fetch                - Force data refresh")
   io.println("       -h | --help                 - Show this help")
   Nil
 }

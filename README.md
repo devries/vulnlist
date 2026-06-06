@@ -29,10 +29,13 @@ by those agencies) as well as the course of action to remedy the vulnerabilities
 
 ```
 Usage: ./vulnlist [-n | --new] [ -a | --any <search_term>] [ -c | --cve <search_term>] [ -v || --vendor <search_term>]
+                  [-d | --added] [-f | --fetch]
        -n | --new                  - Only show not overdue
        -a | --any <search_term>    - Case insensitive search for search term in vendor, product, or description
        -c | --cve <search_term>    - Case insensitive search for search term in CVE ID
        -v | --vendor <search_term> - Case insensitive search for search term in CVE ID
+       -d | --added                - Sort by date added
+       -f | --fetch                - Force data refresh
        -h | --help                 - Show this help
 ```
 
