@@ -23,7 +23,7 @@ pub fn main() {
   use config <- result.try(parse_args(
     args.arguments,
     args.program,
-    Config(filters: [], order: Deadline, force_fetch: False),
+    Config(filters: [], order: Deadline, force_fetch: False, verbose: False),
   ))
 
   use json_data <- result.try(get_vulnerabilities(config.force_fetch))
@@ -60,6 +60,10 @@ pub fn main() {
     <> ")\n\tACTION: "
     <> vl.action
     <> "\n"
+    <> case config.verbose {
+      False -> ""
+      True -> "\tDESCRIPTION: " <> vl.description <> "\n"
+    }
   })
   |> string.join("\n")
   |> io.println
@@ -290,7 +294,12 @@ pub type SortOrder {
 }
 
 pub type Config {
-  Config(filters: List(Filter), order: SortOrder, force_fetch: Bool)
+  Config(
+    filters: List(Filter),
+    order: SortOrder,
+    force_fetch: Bool,
+    verbose: Bool,
+  )
 }
 
 fn parse_args(
@@ -329,6 +338,9 @@ fn parse_args(
     }
     ["-f", ..rest] | ["--fetch", ..rest] -> {
       parse_args(rest, cmd, Config(..config, force_fetch: True))
+    }
+    ["-V", ..rest] | ["--verbose", ..rest] -> {
+      parse_args(rest, cmd, Config(..config, verbose: True))
     }
     ["-h", ..] | ["--help", ..] -> {
       usage(cmd)
@@ -373,9 +385,9 @@ fn matches_filter(filter: Filter, vulnerability: Vuln) -> Bool {
 fn usage(command: String) -> Nil {
   io.println(
     "Usage: "
-    <> command
+    <> filepath.base_name(command)
     <> " [-n | --new] [ -a | --any <search_term>] [ -c | --cve <search_term>] [ -v || --vendor <search_term>]"
-    <> "\n                  [-d | --added] [-f | --fetch]",
+    <> "\n                  [-d | --added] [-f | --fetch] [-V | --verbose]",
   )
   io.println("       -n | --new                  - Only show not overdue")
   io.println(
@@ -389,6 +401,7 @@ fn usage(command: String) -> Nil {
   )
   io.println("       -d | --added                - Sort by date added")
   io.println("       -f | --fetch                - Force data refresh")
+  io.println("       -V | --verbose              - Verbose output")
   io.println("       -h | --help                 - Show this help")
   Nil
 }
