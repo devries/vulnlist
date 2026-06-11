@@ -3,10 +3,11 @@ import directories
 import filepath
 import gleam/bool
 import gleam/dynamic/decode
+import gleam/fetch
 import gleam/http/request
-import gleam/httpc
 import gleam/int
 import gleam/io
+import gleam/javascript/promise
 import gleam/json
 import gleam/list
 import gleam/order
@@ -20,13 +21,16 @@ import simplifile
 pub fn main() {
   let args = argv.load()
 
-  use config <- result.try(parse_args(
-    args.arguments,
-    args.program,
-    Config(filters: [], order: Deadline, force_fetch: False, verbose: False),
-  ))
+  use config <- promise.try_await(
+    parse_args(
+      args.arguments,
+      args.program,
+      Config(filters: [], order: Deadline, force_fetch: False, verbose: False),
+    )
+    |> promise.resolve,
+  )
 
-  use json_data <- result.try(get_vulnerabilities(config.force_fetch))
+  use json_data <- promise.map_try(get_vulnerabilities(config.force_fetch))
   use vulnlist <- result.try({
     vulnlist_from_json(json_data)
     |> report_error("unable to parse data")
@@ -142,7 +146,9 @@ pub fn vulnlist_from_json(
   json.parse(from: json_string, using: decoder)
 }
 
-fn get_vulnerabilities(force_fetch: Bool) -> Result(String, Nil) {
+fn get_vulnerabilities(
+  force_fetch: Bool,
+) -> promise.Promise(Result(String, Nil)) {
   case get_cache_file_path("kev.json") {
     Error(Nil) -> pull_vulnerabilities()
     Ok(filepath) ->
@@ -152,32 +158,38 @@ fn get_vulnerabilities(force_fetch: Bool) -> Result(String, Nil) {
           simplifile.read(filepath)
           |> report_error("error accessing cache " <> filepath)
           |> result.replace_error(Nil)
+          |> promise.resolve
         }
         True ->
-          case pull_vulnerabilities() {
-            Error(Nil) -> Error(Nil)
-            Ok(body) -> {
-              let _ = simplifile.write(filepath, body)
-              Ok(body)
-            }
-          }
+          promise.map_try(pull_vulnerabilities(), fn(body) {
+            let _ = simplifile.write(filepath, body)
+            Ok(body)
+          })
       }
   }
 }
 
-fn pull_vulnerabilities() -> Result(String, Nil) {
+fn pull_vulnerabilities() -> promise.Promise(Result(String, Nil)) {
   let assert Ok(req) =
     request.to(
       "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
     )
 
-  use response <- result.try(
-    req
-    |> httpc.send
-    |> report_error("unable to send query")
-    |> result.replace_error(Nil),
-  )
-  Ok(response.body)
+  use response <- promise.try_await({
+    use raw_resp <- promise.map(fetch.send(req))
+    case raw_resp {
+      Ok(r) -> Ok(r)
+      Error(_) -> Error(Nil)
+    }
+  })
+  use response <- promise.try_await({
+    use raw_resp <- promise.map(fetch.read_text_body(response))
+    case raw_resp {
+      Ok(r) -> Ok(r)
+      Error(_) -> Error(Nil)
+    }
+  })
+  promise.resolve(Ok(response.body))
 }
 
 fn get_cache_file_path(filename: String) -> Result(String, Nil) {

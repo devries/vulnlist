@@ -13,7 +13,8 @@ BINDIR := $(PREFIX)/bin
 build: $(BINARY)
 	
 $(BINARY): $(SOURCE) manifest.toml
-	gleam export escript
+	gleam build
+	bun build --compile --outfile=vulnlist build/dev/javascript/vulnlist/vulnlist.mjs --footer="main();"
 
 test:
 	gleam test
