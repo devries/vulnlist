@@ -160,11 +160,11 @@ fn get_vulnerabilities(
           |> result.replace_error(Nil)
           |> promise.resolve
         }
-        True ->
-          promise.map_try(pull_vulnerabilities(), fn(body) {
-            let _ = simplifile.write(filepath, body)
-            Ok(body)
-          })
+        True -> {
+          use body <- promise.map_try(pull_vulnerabilities())
+          let _ = simplifile.write(filepath, body)
+          Ok(body)
+        }
       }
   }
 }
@@ -175,20 +175,12 @@ fn pull_vulnerabilities() -> promise.Promise(Result(String, Nil)) {
       "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
     )
 
-  use response <- promise.try_await({
-    use raw_resp <- promise.map(fetch.send(req))
-    case raw_resp {
-      Ok(r) -> Ok(r)
-      Error(_) -> Error(Nil)
-    }
-  })
-  use response <- promise.try_await({
-    use raw_resp <- promise.map(fetch.read_text_body(response))
-    case raw_resp {
-      Ok(r) -> Ok(r)
-      Error(_) -> Error(Nil)
-    }
-  })
+  use response <- promise.try_await(
+    fetch.send(req) |> promise.map(result.replace_error(_, Nil)),
+  )
+  use response <- promise.try_await(
+    fetch.read_text_body(response) |> promise.map(result.replace_error(_, Nil)),
+  )
   promise.resolve(Ok(response.body))
 }
 
