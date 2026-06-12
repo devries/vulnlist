@@ -193,7 +193,6 @@ fn get_vulnerabilities(
         False -> {
           io.println("Note: using cached data")
           simplifile.read(filepath)
-          |> report_error("error accessing cache " <> filepath)
           |> result.map_error(CacheError)
           |> promise.resolve
         }
@@ -243,12 +242,6 @@ fn need_vuln_refresh(filepath: String) -> Bool {
     Error(_) -> True
     Ok(info) -> info.mtime_seconds < { current - 3600 }
   }
-}
-
-fn report_error(r: Result(a, b), message: String) -> Result(a, b) {
-  use ev <- result.try_recover(r)
-  io.println(message <> ": " <> string.inspect(ev))
-  Error(ev)
 }
 
 fn trimmed_string_decoder() {
