@@ -18,24 +18,35 @@ import gleam/time/duration
 import gleam/time/timestamp
 import simplifile
 
+pub type AppError {
+  ArgsError
+  CacheError(simplifile.FileError)
+  FetchError(fetch.FetchError)
+  ParseError(json.DecodeError)
+}
+
 pub fn main() {
   let args = argv.load()
 
-  use config <- promise.try_await(
-    parse_args(
-      args.arguments,
-      args.program,
-      Config(filters: [], order: Deadline, force_fetch: False, verbose: False),
-    )
-    |> promise.resolve,
-  )
+  // Execute the pipeline and handle the final outcome in one place
+  run(args)
+  |> promise.map(fn(result) {
+    case result {
+      Ok(Nil) -> Nil
+      Error(err) -> print_app_error(err)
+    }
+  })
+}
+
+pub fn run(args: argv.Argv) -> promise.Promise(Result(Nil, AppError)) {
+  use config <- promise_result_try(parse_args(
+    args.arguments,
+    args.program,
+    Config(filters: [], order: Deadline, force_fetch: False, verbose: False),
+  ))
 
   use json_data <- promise.map_try(get_vulnerabilities(config.force_fetch))
-  use vulnlist <- result.try({
-    vulnlist_from_json(json_data)
-    |> report_error("unable to parse data")
-    |> result.replace_error(Nil)
-  })
+  use vulnlist <- result.try(vulnlist_from_json(json_data))
 
   vulnlist.vulnerabilities
   |> list.filter(fn(vuln) { list.all(config.filters, matches_filter(_, vuln)) })
@@ -73,6 +84,33 @@ pub fn main() {
   |> io.println
 
   Ok(Nil)
+}
+
+fn print_app_error(error: AppError) -> Nil {
+  case error {
+    ArgsError -> Nil
+    // Usage instructions are already printed during parsing
+    CacheError(err) ->
+      io.println("Error: Local storage failure (" <> string.inspect(err) <> ")")
+    FetchError(_) ->
+      io.println(
+        "Error: Network failure. Unable to download latest vulnerability feed.",
+      )
+    ParseError(_) ->
+      io.println(
+        "Error: Data corruption. The vulnerability catalog could not be parsed.",
+      )
+  }
+}
+
+fn promise_result_try(
+  from result: Result(a, e),
+  next callback: fn(a) -> promise.Promise(Result(b, e)),
+) -> promise.Promise(Result(b, e)) {
+  case result {
+    Ok(value) -> callback(value)
+    Error(error) -> promise.resolve(Error(error))
+  }
 }
 
 pub type Vuln {
@@ -119,9 +157,7 @@ pub fn vuln_decoder() -> decode.Decoder(Vuln) {
   ))
 }
 
-pub fn vulnlist_from_json(
-  json_string: String,
-) -> Result(VulnList, json.DecodeError) {
+pub fn vulnlist_from_json(json_string: String) -> Result(VulnList, AppError) {
   let decoder = {
     use title <- decode.field("title", trimmed_string_decoder())
     use catalog_version <- decode.field(
@@ -144,20 +180,21 @@ pub fn vulnlist_from_json(
   }
 
   json.parse(from: json_string, using: decoder)
+  |> result.map_error(ParseError)
 }
 
 fn get_vulnerabilities(
   force_fetch: Bool,
-) -> promise.Promise(Result(String, Nil)) {
+) -> promise.Promise(Result(String, AppError)) {
   case get_cache_file_path("kev.json") {
-    Error(Nil) -> pull_vulnerabilities()
+    Error(err) -> promise.resolve(Error(err))
     Ok(filepath) ->
       case bool.or(force_fetch, need_vuln_refresh(filepath)) {
         False -> {
           io.println("Note: using cached data")
           simplifile.read(filepath)
           |> report_error("error accessing cache " <> filepath)
-          |> result.replace_error(Nil)
+          |> result.map_error(CacheError)
           |> promise.resolve
         }
         True -> {
@@ -169,29 +206,32 @@ fn get_vulnerabilities(
   }
 }
 
-fn pull_vulnerabilities() -> promise.Promise(Result(String, Nil)) {
+fn pull_vulnerabilities() -> promise.Promise(Result(String, AppError)) {
   let assert Ok(req) =
     request.to(
       "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
     )
 
-  use response <- promise.try_await(
-    fetch.send(req) |> promise.map(result.replace_error(_, Nil)),
-  )
-  use response <- promise.try_await(
-    fetch.read_text_body(response) |> promise.map(result.replace_error(_, Nil)),
-  )
-  promise.resolve(Ok(response.body))
+  fetch.send(req)
+  |> promise.try_await(fetch.read_text_body)
+  |> promise.map(fn(resp) {
+    resp
+    |> result.map(fn(response) { response.body })
+    |> result.map_error(FetchError)
+  })
 }
 
-fn get_cache_file_path(filename: String) -> Result(String, Nil) {
-  use base_dir <- result.try(directories.cache_dir())
+fn get_cache_file_path(filename: String) -> Result(String, AppError) {
+  use base_dir <- result.try(
+    directories.cache_dir()
+    |> result.replace_error(CacheError(simplifile.Enoent)),
+  )
 
   let app_dir = filepath.join(base_dir, "vulnlist")
 
   case simplifile.create_directory_all(app_dir) {
     Ok(_) -> Ok(filepath.join(app_dir, filename))
-    Error(_) -> Error(Nil)
+    Error(err) -> Error(CacheError(err))
   }
 }
 
@@ -310,7 +350,7 @@ fn parse_args(
   args: List(String),
   cmd: String,
   config: Config,
-) -> Result(Config, Nil) {
+) -> Result(Config, AppError) {
   case args {
     [] -> Ok(config)
     ["-n", ..rest] | ["--new", ..rest] -> {
@@ -348,11 +388,11 @@ fn parse_args(
     }
     ["-h", ..] | ["--help", ..] -> {
       usage(cmd)
-      Error(Nil)
+      Error(ArgsError)
     }
     [_, ..] -> {
       usage(cmd)
-      Error(Nil)
+      Error(ArgsError)
     }
   }
 }
