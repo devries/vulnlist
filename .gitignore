@@ -3,5 +3,7 @@
 /build
 /dist
 erl_crash.dump
-vulnlist
+vulnlist-darwin
+vulnlist-linux-x64
+vulnlist-linux-arm64
 vulnlist-*.tgz
