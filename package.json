@@ -1,0 +1,15 @@
+{
+  "name": "vulnlist",
+  "version": "1.0.0",
+  "type": "module",
+  "bin": {
+    "vulnlist": "./bin/cli.js"
+  },
+  "files": [
+    "bin/",
+    "dist/"
+  ],
+  "scripts": {
+    "build:dist": "gleam build && bun build --target bun build/dev/javascript/vulnlist/vulnlist.mjs --outfile=dist/vulnlist.js --footer='main();'"
+  }
+}
