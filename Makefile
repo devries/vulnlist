@@ -1,5 +1,6 @@
 BINARY := vulnlist
 SOURCE := src/vulnlist.gleam
+VERSION := 1.0.0
 
 ifeq ($(shell id -u), 0)
     PREFIX := /usr/local
@@ -8,7 +9,7 @@ else
 endif
 BINDIR := $(PREFIX)/bin
 
-.PHONY: build test
+.PHONY: build test install dist
 
 build: $(BINARY)
 	
@@ -24,3 +25,10 @@ install: $(BINARY)
 	mkdir -p $(BINDIR)
 	cp $(BINARY) $(BINDIR)/
 	chmod 755 $(BINDIR)/$(BINARY)
+
+dist: vulnlist-$(VERSION).tgz
+
+
+vulnlist-$(VERSION).tgz: $(SOURCE) package.json bin/cli.js
+	bun run build:dist
+	bun pm pack
