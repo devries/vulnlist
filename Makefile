@@ -1,7 +1,6 @@
 BINARY := vulnlist
 SOURCE := src/vulnlist.gleam
-VERSION := 1.0.0
-ARCH := darwin
+VERSION := 1.1.0
 
 ifeq ($(shell id -u), 0)
     PREFIX := /usr/local
@@ -12,27 +11,19 @@ BINDIR := $(PREFIX)/bin
 
 .PHONY: build test install dist clean
 
-build: $(BINARY)-darwin $(BINARY)-linux-x64 $(BINARY)-linux-arm64
-	
-$(BINARY)-darwin: $(SOURCE) manifest.toml
-	gleam build
-	bun build --compile --target bun-darwin-arm64 --minify --bytecode --outfile=$@ entry.js
+build: $(BINARY)
 
-$(BINARY)-linux-x64: $(SOURCE) manifest.toml
+$(BINARY): $(SOURCE) manifest.toml
 	gleam build
-	bun build --compile --target bun-linux-x64 --minify --bytecode --outfile=$@ entry.js
-
-$(BINARY)-linux-arm64: $(SOURCE) manifest.toml
-	gleam build
-	bun build --compile --target bun-linux-arm64 --minify --bytecode --outfile=$@ entry.js
+	bun build --compile --minify --bytecode --outfile=$@ entry.js
 
 test:
 	gleam test
 
-install: $(BINARY)-$(ARCH)
-	@echo "Installing $(BINARY)-$(ARCH) to $(BINDIR)/$(BINARY)..."
+install: $(BINARY)
+	@echo "Installing $(BINARY) to $(BINDIR)/$(BINARY)..."
 	mkdir -p $(BINDIR)
-	cp $(BINARY)-$(ARCH) $(BINDIR)/$(BINARY)
+	cp $(BINARY) $(BINDIR)/$(BINARY)
 	chmod 755 $(BINDIR)/$(BINARY)
 
 dist: $(BINARY)-$(VERSION).tgz
