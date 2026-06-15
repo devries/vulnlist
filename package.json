@@ -10,6 +10,6 @@
     "dist/"
   ],
   "scripts": {
-    "build:dist": "gleam build && bun build --target bun build/dev/javascript/vulnlist/vulnlist.mjs --outfile=dist/vulnlist.js --footer='main();'"
+    "build:dist": "gleam build && bun build --target bun ./entry.js --outfile=dist/vulnlist.js"
   }
 }
