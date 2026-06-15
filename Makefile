@@ -33,9 +33,7 @@ $(BINARY)-$(VERSION).tgz: $(SOURCE) package.json bin/cli.js
 	bun pm pack
 
 clean:
-	-rm -f $(BINARY)-darwin
-	-rm -f $(BINARY)-linux-x64
-	-rm -f $(BINARY)-linux-arm64
+	-rm -f $(BINARY)
 	-rm -rf dist
 	-rm -rf build
 	-rm -rf ort-result
