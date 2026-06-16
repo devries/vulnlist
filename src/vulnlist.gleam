@@ -1,7 +1,6 @@
 import argv
 import directories
 import filepath
-import gleam/bool
 import gleam/dynamic/decode
 import gleam/fetch
 import gleam/http/request
@@ -189,7 +188,7 @@ fn get_vulnerabilities(
   case get_cache_file_path("kev.json") {
     Error(err) -> promise.resolve(Error(err))
     Ok(filepath) ->
-      case bool.or(force_fetch, need_vuln_refresh(filepath)) {
+      case force_fetch || need_vuln_refresh(filepath) {
         False -> {
           io.println("Note: using cached data")
           simplifile.read(filepath)
