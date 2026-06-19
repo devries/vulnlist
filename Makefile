@@ -1,6 +1,6 @@
 BINARY := vulnlist
 SOURCE := src/vulnlist.gleam
-VERSION := 1.1.0
+VERSION := 1.1.1
 
 ifeq ($(shell id -u), 0)
     PREFIX := /usr/local
