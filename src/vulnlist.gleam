@@ -38,51 +38,58 @@ pub fn main() {
 }
 
 pub fn run(args: argv.Argv) -> promise.Promise(Result(Nil, AppError)) {
-  use config <- promise_result_try(parse_args(
-    args.arguments,
-    args.program,
-    Config(filters: [], order: Deadline, force_fetch: False, verbose: False),
-  ))
+  case
+    parse_args(
+      args.arguments,
+      args.program,
+      Config(filters: [], order: Deadline, force_fetch: False, verbose: False),
+    )
+  {
+    Error(err) -> promise.resolve(Error(err))
+    Ok(config) -> {
+      use json_data <- promise.map_try(get_vulnerabilities(config.force_fetch))
+      use vulnlist <- result.try(vulnlist_from_json(json_data))
 
-  use json_data <- promise.map_try(get_vulnerabilities(config.force_fetch))
-  use vulnlist <- result.try(vulnlist_from_json(json_data))
+      vulnlist.vulnerabilities
+      |> list.filter(fn(vuln) {
+        list.all(config.filters, matches_filter(_, vuln))
+      })
+      |> list.sort(fn(a: Vuln, b: Vuln) {
+        case config.order {
+          Deadline -> timestamp.compare(a.due, b.due)
+          Creation -> timestamp.compare(a.date_added, b.date_added)
+        }
+      })
+      |> list.index_map(fn(vl, idx) {
+        int.to_string(idx + 1)
+        <> ". "
+        <> vl.vendor_project
+        <> " - "
+        <> vl.product
+        <> " - "
+        <> vl.vulnerability_name
+        <> " - "
+        <> vl.cve_id
+        <> "\n\tAdded: "
+        <> time_to_date(vl.date_added)
+        <> "\n\tDeadline: "
+        <> deadline(vl.due)
+        <> " ("
+        <> time_to_date(vl.due)
+        <> ")\n\tACTION: "
+        <> vl.action
+        <> "\n"
+        <> case config.verbose {
+          False -> ""
+          True -> "\tDESCRIPTION: " <> vl.description <> "\n"
+        }
+      })
+      |> string.join("\n")
+      |> io.println
 
-  vulnlist.vulnerabilities
-  |> list.filter(fn(vuln) { list.all(config.filters, matches_filter(_, vuln)) })
-  |> list.sort(fn(a: Vuln, b: Vuln) {
-    case config.order {
-      Deadline -> timestamp.compare(a.due, b.due)
-      Creation -> timestamp.compare(a.date_added, b.date_added)
+      Ok(Nil)
     }
-  })
-  |> list.index_map(fn(vl, idx) {
-    int.to_string(idx + 1)
-    <> ". "
-    <> vl.vendor_project
-    <> " - "
-    <> vl.product
-    <> " - "
-    <> vl.vulnerability_name
-    <> " - "
-    <> vl.cve_id
-    <> "\n\tAdded: "
-    <> time_to_date(vl.date_added)
-    <> "\n\tDeadline: "
-    <> deadline(vl.due)
-    <> " ("
-    <> time_to_date(vl.due)
-    <> ")\n\tACTION: "
-    <> vl.action
-    <> "\n"
-    <> case config.verbose {
-      False -> ""
-      True -> "\tDESCRIPTION: " <> vl.description <> "\n"
-    }
-  })
-  |> string.join("\n")
-  |> io.println
-
-  Ok(Nil)
+  }
 }
 
 fn print_app_error(error: AppError) -> Nil {
@@ -99,16 +106,6 @@ fn print_app_error(error: AppError) -> Nil {
       io.println(
         "Error: Data corruption. The vulnerability catalog could not be parsed.",
       )
-  }
-}
-
-fn promise_result_try(
-  from result: Result(a, e),
-  next callback: fn(a) -> promise.Promise(Result(b, e)),
-) -> promise.Promise(Result(b, e)) {
-  case result {
-    Ok(value) -> callback(value)
-    Error(error) -> promise.resolve(Error(error))
   }
 }
 
