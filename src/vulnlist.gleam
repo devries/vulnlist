@@ -257,9 +257,6 @@ fn date_decoder() -> decode.Decoder(timestamp.Timestamp) {
       case calendar.month_from_int(month_int) {
         Ok(month) -> {
           let dt = calendar.Date(year, month, day)
-          // let #(_, tod) =
-          //   timestamp.system_time()
-          //   |> timestamp.to_calendar(calendar.local_offset())
           let tod = calendar.TimeOfDay(0, 0, 0, 0)
 
           decode.success(timestamp.from_calendar(
