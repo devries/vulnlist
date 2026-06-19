@@ -11,7 +11,7 @@ binary in your bun path. Only [bun](https://bun.sh/) is required for this
 installation method.
 
 ```
-bun install -g https://code.unnecessary.tech/devries/vulnlist/releases/download/v1.1.0/vulnlist-1.1.0.tgz
+bun install -g https://code.unnecessary.tech/devries/vulnlist/releases/download/v1.1.1/vulnlist-1.1.1.tgz
 ```
 
 ## Create a cli binary
